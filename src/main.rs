@@ -5,6 +5,8 @@ extern crate csv;
 use getopts::Options;
 use std::env;
 use std::fs::File;
+use std::path::Path;
+use std::error::Error;
 
 // This struct represents the data in each row of the CSV file.
 // Type based decoding absolves us of a lot of the nitty gritty error
@@ -36,13 +38,15 @@ fn print_usage(program: &str, opts: Options) {
     println!("{}", opts.usage(&format!("Usage: {} [options] <data-path> <city>", program)));
 }
 
-fn search<P: AsRef<Path>>(file_path: P, city: &str) -> Vec<PopulationCount> {
+fn search<P: AsRef<Path>>
+         (file_path: P, city: &str)
+         -> Result<Vec<PopulationCount>, Box<Error+Send+Sync>> {
     let mut found = vec![];
-    let file = File::open(file_path).unwrap();
+    let file = try!(File::open(file_path));
     let mut rdr = csv::Reader::from_reader(file);
 
     for row in rdr.decode::<Row>() {
-        let row = row.unwrap();
+        let row = try!(row);
 
         match row.population {
             None => { } // skip it
@@ -55,7 +59,11 @@ fn search<P: AsRef<Path>>(file_path: P, city: &str) -> Vec<PopulationCount> {
             },
         }
     }
-    found
+    if found.is_empty() {
+        Err(From::from("No matching cities with a population were found."))
+    } else {
+        Ok(found)
+    }
 }
 
 fn main() {
@@ -75,7 +83,12 @@ fn main() {
     }
     let data_path = &args[1];
     let city = &args[2];
-    for pop in search(data_path, city) {
-        println!("{}, {}: {:?}", pop.city, pop.country, pop.count);
+    match search(&data_path, &city) {
+        Ok(pops) => {
+            for pop in pops {
+                println!("{}, {}: {:?}", pop.city, pop.country, pop.count);
+            }
+        }
+        Err(err) => println!("{}", err)
     }
 }
