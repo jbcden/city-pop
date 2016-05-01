@@ -7,6 +7,7 @@ use std::env;
 use std::fs::File;
 use std::path::Path;
 use std::error::Error;
+use std::io;
 
 // This struct represents the data in each row of the CSV file.
 // Type based decoding absolves us of a lot of the nitty gritty error
@@ -35,15 +36,18 @@ struct PopulationCount {
 }
 
 fn print_usage(program: &str, opts: Options) {
-    println!("{}", opts.usage(&format!("Usage: {} [options] <data-path> <city>", program)));
+    println!("{}", opts.usage(&format!("Usage: {} [options] <city>", program)));
 }
 
 fn search<P: AsRef<Path>>
-         (file_path: P, city: &str)
+         (file_path: &Option<P>, city: &str)
          -> Result<Vec<PopulationCount>, Box<Error+Send+Sync>> {
     let mut found = vec![];
-    let file = try!(File::open(file_path));
-    let mut rdr = csv::Reader::from_reader(file);
+    let input: Box<io::Read> = match *file_path {
+        None => Box::new(io::stdin()),
+        Some(ref file_path) => Box::new(try!(File::open(file_path))),
+    };
+    let mut rdr = csv::Reader::from_reader(input);
 
     for row in rdr.decode::<Row>() {
         let row = try!(row);
@@ -71,6 +75,7 @@ fn main() {
     let program = &args[0];
 
     let mut opts = Options::new();
+    opts.optopt("f", "file", "Choose an input file, instead of using STDIN.", "NAME");
     opts.optflag("h", "help", "Show this usage message.");
 
     let matches = match opts.parse(&args[1..]) {
@@ -81,9 +86,17 @@ fn main() {
         print_usage(&program, opts);
         return;
     }
-    let data_path = &args[1];
-    let city = &args[2];
-    match search(&data_path, &city) {
+    let file = matches.opt_str("f");
+    let data_path = &file.as_ref().map(Path::new);
+
+    let city = if !matches.free.is_empty() {
+        &matches.free[0]
+    } else {
+        print_usage(&program, opts);
+        return;
+    };
+
+    match search(data_path, city) {
         Ok(pops) => {
             for pop in pops {
                 println!("{}, {}: {:?}", pop.city, pop.country, pop.count);
